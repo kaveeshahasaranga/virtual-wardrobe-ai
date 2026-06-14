@@ -12,10 +12,10 @@ export default function VirtualWardrobe() {
 
   // Sample garments (in real app these would come from backend)
   const sampleGarments = [
-    { id: 1, name: "Oversized White Tee", category: "Top", color: "White", image: "https://picsum.photos/id/1005/300/300" },
-    { id: 2, name: "Black Denim Jacket", category: "Outerwear", color: "Black", image: "https://picsum.photos/id/1011/300/300" },
-    { id: 3, name: "Beige Linen Shirt", category: "Top", color: "Beige", image: "https://picsum.photos/id/106/300/300" },
-    { id: 4, name: "Relaxed Chino Pants", category: "Bottom", color: "Khaki", image: "https://picsum.photos/id/201/300/300" },
+    { id: 1, name: "Oversized White Tee", category: "Top", color: "White", image: "https://images.unsplash.com/photo-1618519764620-7403ba5c9c52?w=300" },
+    { id: 2, name: "Black Denim Jacket", category: "Outerwear", color: "Black", image: "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=300" },
+    { id: 3, name: "Beige Linen Shirt", category: "Top", color: "Beige", image: "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=300" },
+    { id: 4, name: "Relaxed Chino Pants", category: "Bottom", color: "Khaki", image: "https://images.unsplash.com/photo-1542272604-787c3835535d?w=300" },
   ]
 
   const handleImageUpload = (e) => {
@@ -51,6 +51,9 @@ export default function VirtualWardrobe() {
 
       if (analyzeData.success) {
         setAnalysisResults(analyzeData)
+        // Persist for Outfit Builder and other pages
+        localStorage.setItem('userPhotoBase64', selectedImage)
+        localStorage.setItem('lastAnalysis', JSON.stringify(analyzeData))
         toast.info(`Body: ${analyzeData.body_type || 'N/A'} • Skin: ${analyzeData.skin_tone_category || 'N/A'}`, {
           description: analyzeData.skin_tone
         })

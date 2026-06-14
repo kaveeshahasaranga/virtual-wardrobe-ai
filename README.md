@@ -81,7 +81,7 @@ AI_SERVICE_URL=http://localhost:8000   (used by backend)
 
 ## Notes
 
-- The virtual try-on currently returns demo images. See the research report for recommended models (IDM-VTON, StableVITON, etc.).
+- The virtual try-on now calls a **real model**: IDM-VTON via the public Hugging Face Space (`yisol/IDM-VTON`) using `gradio_client`. This matches the diffusion-based approach highlighted in the research report. Calls can take 20–60s due to the shared queue.
 - Skin tone and body shape detection are practical implementations for the "Personalized Outfit Recommendation" and "Virtual Try-On" components.
 - This is a working research prototype — ready for extension toward publication-quality contributions.
 

@@ -6,7 +6,4 @@ mediapipe
 pillow
 numpy
 requests
-torch
-diffusers
-transformers
-accelerate
+gradio_client

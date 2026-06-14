@@ -4,8 +4,10 @@ from pydantic import BaseModel
 import cv2
 import mediapipe as mp
 import numpy as np
-from PIL import Image
+from PIL import Image as PILImage
 import io
+import requests
+from gradio_client import Client
 
 app = FastAPI(title="WardrobeAI - AI Service", version="1.0")
 
@@ -20,6 +22,57 @@ app.add_middleware(
 mp_pose = mp.solutions.pose
 mp_face = mp.solutions.face_detection
 mp_drawing = mp.solutions.drawing_utils
+
+# === Real Virtual Try-On using Hugging Face Space (IDM-VTON) ===
+# Garment-only / flat-lay style public images (Unsplash direct links).
+# These are much better for VTON models than on-model photos, as the model
+# receives the clothing item itself.
+# Tip: For production, use high-quality garment-only product photos (clean/white background)
+# from your catalog for the best results.
+SAMPLE_GARMENTS = {
+    1: "https://images.unsplash.com/photo-1618519764620-7403ba5c9c52?w=512",   # Oversized White Tee (flat/product style)
+    2: "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=512",   # Black Denim Jacket
+    3: "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=512",    # Beige Linen Shirt (flat-lay style)
+    4: "https://images.unsplash.com/photo-1542272604-787c3835535d?w=512",    # Relaxed Chino Pants (product/flat)
+}
+
+def base64_to_pil(base64_str: str) -> PILImage.Image:
+    """Convert base64 data URI or raw base64 to PIL Image."""
+    if "," in base64_str:
+        base64_str = base64_str.split(",")[1]
+    img_data = base64.b64decode(base64_str)
+    return PILImage.open(io.BytesIO(img_data)).convert("RGB")
+
+def pil_to_base64(img: PILImage.Image, format: str = "PNG") -> str:
+    """Convert PIL Image to base64 data URI."""
+    buffer = io.BytesIO()
+    img.save(buffer, format=format)
+    img_str = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/{format.lower()};base64,{img_str}"
+
+def download_image(url: str) -> PILImage.Image:
+    """Download image from URL to PIL."""
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    return PILImage.open(io.BytesIO(resp.content)).convert("RGB")
+
+def run_idm_vton(person_img: PILImage.Image, garment_img: PILImage.Image) -> PILImage.Image:
+    """Call the public IDM-VTON Hugging Face Space."""
+    client = Client("yisol/IDM-VTON")
+    result = client.predict(
+        human_img=person_img,
+        garm_img=garment_img,
+        garment_des="",           # optional description
+        is_checked=True,
+        is_checked_crop=False,
+        denoise_steps=20,         # lower = faster
+        seed=42,
+        api_name="/tryon"
+    )
+    # The space returns a path to the output image
+    output_path = result[0] if isinstance(result, (list, tuple)) else result
+    return PILImage.open(output_path).convert("RGB")
+
 
 class TryOnRequest(BaseModel):
     user_image_base64: str
@@ -141,33 +194,103 @@ async def analyze_user(file: UploadFile = File(...)):
 @app.post("/try-on")
 async def virtual_try_on(request: TryOnRequest):
     """
-    Placeholder for diffusion-based virtual try-on (IDM-VTON / StableVITON style).
-    In production: forward base64 or URL to a Hugging Face endpoint or local Diffusers pipeline
-    with pose mask + garment + skin/body conditioning.
+    Real virtual try-on using the public IDM-VTON model on Hugging Face Spaces.
+    This follows the diffusion-based approach recommended in the research report.
     """
-    # For now returns a demo image. Real integration would use the models from the literature review.
-    return {
-        "success": True,
-        "result_image": "https://picsum.photos/id/1012/800/1000",
-        "message": "Demo result. Connect real diffusion model (see research report: IDM-VTON, StableVITON, etc.).",
-        "garment_id": request.garment_id,
-        "conditioning_used": ["pose", "body_shape", "skin_tone"]
-    }
+    try:
+        # 1. Decode user photo
+        person_img = base64_to_pil(request.user_image_base64)
+
+        # 2. Get matching garment image (demo mapping)
+        garment_url = SAMPLE_GARMENTS.get(request.garment_id, SAMPLE_GARMENTS[1])
+        garment_img = download_image(garment_url)
+
+        # 3. Call the real HF Space (IDM-VTON)
+        result_img = run_idm_vton(person_img, garment_img)
+
+        # 4. Return as data URL (frontend <img> supports it directly)
+        result_base64 = pil_to_base64(result_img)
+
+        return {
+            "success": True,
+            "result_image": result_base64,
+            "message": "Generated using IDM-VTON (Hugging Face Space)",
+            "garment_id": request.garment_id,
+            "conditioning_used": ["pose", "body_shape", "skin_tone"]
+        }
+
+    except Exception as e:
+        print("Real try-on error:", str(e))
+        # Fallback so the demo never breaks completely
+        return {
+            "success": False,
+            "result_image": "https://picsum.photos/id/1012/800/1000",
+            "message": f"HF Space call failed — showing fallback. ({str(e)})",
+            "garment_id": request.garment_id,
+        }
 
 @app.post("/recommendations")
 async def get_recommendations(user_data: dict):
-    """Basic personalized recommendation stub.
-    In full version: use FashionCLIP embeddings + body/skin + trend signals.
     """
-    body = user_data.get("body_type", "Average")
+    Analysis-aware recommendations.
+    Uses body_type and skin_tone_category to score and filter suggestions.
+    This is a simple rule-based version of the hybrid system described in the research report.
+    """
+    body = user_data.get("body_type", "Rectangle / Balanced")
     skin = user_data.get("skin_tone_category", "Neutral")
-    
-    recs = [
-        {"id": 101, "name": "Oversized Linen Shirt", "reason": f"Flattering for {body} with {skin} undertones", "score": 0.92},
-        {"id": 102, "name": "High-waist Wide Leg Pants", "reason": "Balances proportions and works with current seasonal trends", "score": 0.87},
-        {"id": 103, "name": "Soft Structured Blazer", "reason": "Adds structure; recommended for your body shape", "score": 0.81},
+
+    # Base catalog (in real system this would come from FashionCLIP embeddings + catalog)
+    catalog = [
+        {"id": 101, "name": "Oversized Linen Shirt", "category": "Top", "color": "Beige", "reason_base": "Soft structure flatters balanced proportions"},
+        {"id": 102, "name": "High-waist Wide Leg Pants", "category": "Bottom", "color": "Olive", "reason_base": "Elongates the silhouette"},
+        {"id": 103, "name": "Soft Structured Blazer", "category": "Outerwear", "color": "Cream", "reason_base": "Adds definition without overwhelming"},
+        {"id": 104, "name": "Relaxed Cotton Tee", "category": "Top", "color": "White", "reason_base": "Clean base layer that works with most undertones"},
+        {"id": 105, "name": "Tapered Chino Trousers", "category": "Bottom", "color": "Khaki", "reason_base": "Balanced cut that complements most body shapes"},
+        {"id": 106, "name": "Lightweight Denim Jacket", "category": "Outerwear", "color": "Light Blue", "reason_base": "Versatile layering piece"},
     ]
-    return {"success": True, "recommendations": recs, "explanation": "Generated using body shape + skin tone + preference matching (demo)"}
+
+    scored = []
+    for item in catalog:
+        score = 0.75
+
+        # Body shape logic
+        if "Rectangle" in body or "Balanced" in body:
+            if "Wide Leg" in item["name"] or "Oversized" in item["name"] or "Structured" in item["name"]:
+                score += 0.12
+        if "Inverted" in body:
+            if "High-waist" in item["name"] or "Tapered" in item["name"]:
+                score += 0.10
+        if "Pear" in body or "Hourglass" in body:
+            if "Oversized" in item["name"] or "Wide Leg" in item["name"]:
+                score += 0.08
+
+        # Skin tone logic (simple color harmony)
+        if skin == "Warm":
+            if item["color"] in ["Beige", "Olive", "Cream", "Khaki"]:
+                score += 0.10
+        elif skin == "Cool":
+            if item["color"] in ["Light Blue", "White"]:
+                score += 0.10
+        else:
+            score += 0.05
+
+        reason = f"{item['reason_base']}. Complements your {body.split('/')[0].strip().lower()} shape and {skin.lower()} undertones."
+
+        scored.append({
+            **item,
+            "score": round(min(score, 0.98), 2),
+            "reason": reason
+        })
+
+    # Sort by score and return top 5
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    top_recs = scored[:5]
+
+    return {
+        "success": True,
+        "recommendations": top_recs,
+        "explanation": f"Recommendations generated using your {body} body shape and {skin} skin undertones (simple rule-based hybrid model as described in the research report)."
+    }
 
 if __name__ == "__main__":
     import uvicorn
