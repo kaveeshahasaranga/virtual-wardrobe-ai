@@ -1,5 +1,5 @@
 // Simple API client for the WardrobeAI system
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001'
 
 export const api = {
   async analyzeUser(imageBase64) {

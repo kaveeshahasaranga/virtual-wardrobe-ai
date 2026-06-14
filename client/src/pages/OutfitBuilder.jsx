@@ -17,12 +17,7 @@ export default function OutfitBuilder() {
         skin_tone_category: "Warm"
       }
 
-      const res = await fetch('http://localhost:5000/api/ai/recommendations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mockUserData)
-      })
-      const data = await res.json()
+      const data = await api.getRecommendations(mockUserData)
 
       if (data.success) {
         setAnalysis(mockUserData)

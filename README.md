@@ -30,7 +30,7 @@ npm install          # if not already done
 npm run dev
 ```
 
-Runs on http://localhost:5000
+Runs on http://localhost:5001 (default)
 
 ### 3. Frontend (React)
 ```bash

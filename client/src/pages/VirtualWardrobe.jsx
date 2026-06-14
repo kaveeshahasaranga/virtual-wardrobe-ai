@@ -47,12 +47,7 @@ export default function VirtualWardrobe() {
 
     try {
       // 1. Analyze pose + body shape + skin tone via backend gateway (recommended)
-      const analyzeRes = await fetch('http://localhost:5000/api/ai/analyze-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_base64: selectedImage }),
-      })
-      const analyzeData = await analyzeRes.json()
+      const analyzeData = await api.analyzeUser(selectedImage)
 
       if (analyzeData.success) {
         setAnalysisResults(analyzeData)
@@ -62,15 +57,7 @@ export default function VirtualWardrobe() {
       }
 
       // 2. Call try-on through gateway (placeholder for now, ready for real diffusion)
-      const tryOnRes = await fetch('http://localhost:5000/api/ai/try-on', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_image_base64: selectedImage,
-          garment_id: selectedGarment.id,
-        }),
-      })
-      const tryOnData = await tryOnRes.json()
+      const tryOnData = await api.generateTryOn(selectedImage, selectedGarment.id)
 
       setTryOnResult(tryOnData.result_image)
       toast.success('Virtual try-on generated!', { 
