@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Shirt, Sparkles, RefreshCw, X, Camera, Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import api from '../lib/api'
+import api, { getDemoUserId } from '../lib/api'
 
 export default function OutfitBuilder() {
   const [analysis, setAnalysis] = useState(null)
@@ -11,38 +11,81 @@ export default function OutfitBuilder() {
   const [generatedLooks, setGeneratedLooks] = useState([]) // { item, image, loading }
   const [isLoadingRecs, setIsLoadingRecs] = useState(false)
   const [isGeneratingLooks, setIsGeneratingLooks] = useState(false)
+  const [savedOutfits, setSavedOutfits] = useState([])
 
-  // Load saved analysis + photo from previous Virtual Try-On session
+  // Load saved analysis + photo from previous Virtual Try-On session (prefer server persistence)
   useEffect(() => {
-    const savedAnalysis = localStorage.getItem('lastAnalysis')
-    const savedPhoto = localStorage.getItem('userPhotoBase64')
+    const loadFromServer = async () => {
+      try {
+        const serverData = await api.getLatestAnalysis()
+        if (serverData?.success && serverData.analysis) {
+          const a = serverData.analysis
+          const normalized = {
+            success: true,
+            body_type: a.bodyType,
+            skin_tone: a.skinTone,
+            skin_tone_category: a.skinToneCategory,
+            landmarks_sample: a.landmarksSample,
+          }
+          setAnalysis(normalized)
+          // Also keep in localStorage for recommendations etc.
+          localStorage.setItem('lastAnalysis', JSON.stringify(normalized))
 
-    if (savedAnalysis) {
-      const parsed = JSON.parse(savedAnalysis)
-      setAnalysis(parsed)
+          // auto load recs
+          setTimeout(() => loadRecommendations(normalized), 50)
+          return true
+        }
+      } catch (_) {
+        // ignore, fall back to local
+      }
+      return false
     }
-    if (savedPhoto) {
-      setUserPhoto(savedPhoto)
+
+    const init = async () => {
+      const fromServer = await loadFromServer()
+      if (fromServer) return
+
+      // Fallback to localStorage
+      const savedAnalysis = localStorage.getItem('lastAnalysis')
+      const savedPhoto = localStorage.getItem('userPhotoBase64')
+
+      if (savedAnalysis) {
+        const parsed = JSON.parse(savedAnalysis)
+        setAnalysis(parsed)
+        setTimeout(() => {
+          loadRecommendations()
+        }, 50)
+      }
+      if (savedPhoto) {
+        setUserPhoto(savedPhoto)
+      }
     }
-    // Auto-load recommendations if we have analysis
-    if (savedAnalysis) {
-      // small delay to allow state to settle
-      setTimeout(() => {
-        loadRecommendations()
-      }, 50)
-    }
+
+    init()
   }, [])
 
-  const loadRecommendations = async () => {
-    if (!analysis) {
+  // Load previously saved outfits for this demo user
+  useEffect(() => {
+    const loadSaved = async () => {
+      try {
+        const data = await api.getSavedOutfits()
+        if (data.success) setSavedOutfits(data.outfits || [])
+      } catch (_) {}
+    }
+    loadSaved()
+  }, [])
+
+  const loadRecommendations = async (overrideAnalysis) => {
+    const current = overrideAnalysis || analysis
+    if (!current) {
       toast.error('No body/skin analysis found. Please do a Virtual Try-On first.')
       return
     }
     setIsLoadingRecs(true)
     try {
       const data = await api.getRecommendations({
-        body_type: analysis.body_type,
-        skin_tone_category: analysis.skin_tone_category,
+        body_type: current.body_type,
+        skin_tone_category: current.skin_tone_category,
       })
       if (data.success) {
         setRecommendations(data.recommendations)
@@ -122,6 +165,37 @@ export default function OutfitBuilder() {
 
     setIsGeneratingLooks(false)
     toast.success('Full outfit visualizations generated!')
+  }
+
+  const saveCurrentLook = async () => {
+    if (generatedLooks.length === 0) {
+      toast.error('Generate some looks first')
+      return
+    }
+    try {
+      const looksForSave = generatedLooks
+        .filter(l => l.image && !l.loading)
+        .map(l => ({
+          itemId: l.item.id,
+          itemName: l.item.name,
+          image: l.image,
+        }))
+
+      const res = await api.saveOutfit({
+        name: `Look with ${currentOutfit.length} items`,
+        items: currentOutfit,
+        generatedLooks: looksForSave,
+      })
+
+      if (res.success) {
+        toast.success('Look saved to your wardrobe!')
+        // Refresh saved list
+        const fresh = await api.getSavedOutfits()
+        if (fresh.success) setSavedOutfits(fresh.outfits || [])
+      }
+    } catch (e) {
+      toast.error('Failed to save look')
+    }
   }
 
   return (
@@ -230,17 +304,28 @@ export default function OutfitBuilder() {
           <div className="text-sm text-zinc-500 mb-4">Add items from the recommendations above.</div>
         )}
 
-        <button
-          onClick={generateFullOutfitTryOns}
-          disabled={currentOutfit.length === 0 || isGeneratingLooks || !userPhoto}
-          className="flex items-center gap-3 bg-white text-black font-medium px-6 py-3 rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.985] transition-all"
-        >
-          {isGeneratingLooks ? (
-            <> <RefreshCw className="w-4 h-4 animate-spin" /> Generating full look visualizations... </>
-          ) : (
-            <> <Sparkles className="w-4 h-4" /> Generate Full Outfit Try-Ons ({currentOutfit.length}) </>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={generateFullOutfitTryOns}
+            disabled={currentOutfit.length === 0 || isGeneratingLooks || !userPhoto}
+            className="flex items-center gap-3 bg-white text-black font-medium px-6 py-3 rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.985] transition-all"
+          >
+            {isGeneratingLooks ? (
+              <> <RefreshCw className="w-4 h-4 animate-spin" /> Generating full look visualizations... </>
+            ) : (
+              <> <Sparkles className="w-4 h-4" /> Generate Full Outfit Try-Ons ({currentOutfit.length}) </>
+            )}
+          </button>
+
+          {generatedLooks.length > 0 && (
+            <button
+              onClick={saveCurrentLook}
+              className="flex items-center gap-2 px-5 py-3 rounded-2xl border border-white/20 hover:bg-white/5 text-sm"
+            >
+              Save this look
+            </button>
           )}
-        </button>
+        </div>
         {!userPhoto && <p className="text-xs text-amber-400 mt-2">Upload your photo in the Virtual Try-On page to enable this.</p>}
       </div>
 
@@ -277,6 +362,37 @@ export default function OutfitBuilder() {
         This demonstrates body/skin-aware recommendations + full-outfit visualization (as proposed in the research report).
         In a production version this would use FashionCLIP embeddings for compatibility + trend signals.
       </div>
+
+      {/* Previously saved outfits from Mongo */}
+      {savedOutfits.length > 0 && (
+        <div className="mt-10">
+          <h2 className="font-semibold text-xl mb-4">Your Saved Looks</h2>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {savedOutfits.map((outfit, idx) => (
+              <div key={idx} className="rounded-3xl border border-white/10 bg-zinc-900/50 overflow-hidden">
+                <div className="p-4 border-b border-white/10 text-sm flex items-center justify-between">
+                  <div className="font-medium">{outfit.name}</div>
+                  <div className="text-[10px] text-zinc-500">{new Date(outfit.createdAt).toLocaleDateString()}</div>
+                </div>
+                <div className="p-4 grid grid-cols-2 gap-3">
+                  {(outfit.generatedLooks || []).slice(0, 4).map((look, i) => (
+                    <div key={i} className="aspect-[4/3] bg-zinc-950 rounded-xl overflow-hidden">
+                      {look.image ? (
+                        <img src={look.image} alt={look.itemName} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="text-xs text-zinc-600 flex items-center justify-center h-full">No image</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="px-4 pb-4 text-xs text-zinc-400">
+                  {(outfit.items || []).map(i => i.name).join(' + ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

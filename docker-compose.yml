@@ -1,19 +1,69 @@
 version: '3.8'
 
 services:
-  server:
-    build: ./server
-    ports:
-      - "5000:5000"
-    environment:
-      - AI_SERVICE_URL=http://ai-service:8000
-    depends_on:
-      - ai-service
-
   ai-service:
     build: ./ai-service
+    container_name: wardrobe-ai-service
     ports:
       - "8000:8000"
-    # Note: MediaPipe + OpenCV may need additional system libs in some containers
+    environment:
+      - PORT=8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode() == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
 
-  # Add mongo, etc. later
+  server:
+    build: ./server
+    container_name: wardrobe-server
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - AI_SERVICE_URL=http://ai-service:8000
+      - MONGODB_URI=mongodb://mongo:27017/wardrobe
+    depends_on:
+      ai-service:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Frontend (optional - run with `cd client && npm run dev` for hot reload during development)
+  # client:
+  #   build: ./client
+  #   ports:
+  #     - "5173:5173"
+  #   environment:
+  #     - VITE_BACKEND_URL=http://localhost:5001
+  #   depends_on:
+  #     - server
+
+  mongo:
+    image: mongo:7
+    container_name: wardrobe-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=wardrobe
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mongo-data:

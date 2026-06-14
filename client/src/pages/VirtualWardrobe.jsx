@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Camera, Upload, RefreshCw, User, Palette, Info } from 'lucide-react'
 import { toast } from 'sonner'
-import api from '../lib/api'
+import api, { getDemoUserId } from '../lib/api'
 
 export default function VirtualWardrobe() {
   const [selectedImage, setSelectedImage] = useState(null)
@@ -51,9 +51,15 @@ export default function VirtualWardrobe() {
 
       if (analyzeData.success) {
         setAnalysisResults(analyzeData)
-        // Persist for Outfit Builder and other pages
+        // Persist for Outfit Builder and other pages (local + backend)
         localStorage.setItem('userPhotoBase64', selectedImage)
         localStorage.setItem('lastAnalysis', JSON.stringify(analyzeData))
+
+        // Save to Mongo via backend
+        api.saveAnalysis(analyzeData).catch(() => {
+          // non-fatal
+        })
+
         toast.info(`Body: ${analyzeData.body_type || 'N/A'} • Skin: ${analyzeData.skin_tone_category || 'N/A'}`, {
           description: analyzeData.skin_tone
         })

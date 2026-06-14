@@ -22,6 +22,12 @@ After changing requirements (e.g. adding gradio_client), re-run:
 pip install -r requirements.txt
 ```
 
+> Note: The `venv/` directory is now gitignored. A `Dockerfile` is provided for containerized runs.
+
+## Docker
+
+The service is built and run automatically via the root `docker compose up --build`.
+
 ## Key Endpoints
 
 - `POST /analyze-user` — Pose + body shape + skin tone (combined)

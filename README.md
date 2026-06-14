@@ -2,7 +2,30 @@
 
 Full-stack prototype implementing the architecture and research directions from the comprehensive 2026 research report.
 
-## Quick Start (Recommended Order)
+## Quick Start with Docker (Recommended)
+
+This is now the easiest way to run the full backend stack.
+
+```bash
+# 1. Copy env (optional but recommended)
+cp .env.example .env
+
+# 2. Start the AI service + backend gateway
+docker compose up --build
+
+# 3. In a separate terminal, start the frontend (best for hot-reload during development)
+cd client && npm run dev
+```
+
+- AI service: http://localhost:8000/docs
+- Backend gateway: http://localhost:5001/api/health
+- Frontend: http://localhost:5173
+
+> **Note:** The first `docker compose up --build` can take a few minutes (it installs heavy ML dependencies for MediaPipe/OpenCV).
+
+## Quick Start (Manual / Development)
+
+### 1. AI Service (Python + MediaPipe + FastAPI)
 
 ### 1. AI Service (Python + MediaPipe + FastAPI)
 This powers pose estimation, body shape, skin tone detection, and (placeholder) virtual try-on.
@@ -66,18 +89,33 @@ Open http://localhost:5173 (usually).
 - Data flow: User photo → Backend → AI service (pose/skin) → Try-on / Recs
 
 Next milestones (see todo list in development):
-- Real diffusion model integration (Hugging Face or local)
+- Real diffusion model integration (Hugging Face or local) — *partial via IDM-VTON*
 - Firebase Auth + Storage
-- MongoDB for user profiles, wardrobe, history
+- ~~MongoDB for user profiles, wardrobe, history~~ ✅ (basic persistence implemented)
 - Trend forecasting module
 - Better XAI visualizations (attention, explanations)
-- Docker Compose for easy one-command startup
+- ~~Docker Compose for easy one-command startup~~ ✅ (completed in foundation pass)
 
 ## Environment
 
-Copy `.env.example` to `.env` in relevant folders as needed.
+Copy `.env.example` to `.env` (at project root) as needed.
 
-AI_SERVICE_URL=http://localhost:8000   (used by backend)
+Key variables:
+- `AI_SERVICE_URL` — used by the Express server to reach the AI microservice
+- `VITE_BACKEND_URL` — used by the React client
+- `PORT` — backend port (defaults to 5001)
+
+A root `.gitignore` was added to prevent committing `node_modules/`, Python `venv/`, `.env*` files, etc.
+
+## Docker Notes
+- Dockerfiles exist for both `server/` and `ai-service/`.
+- `docker compose up --build` brings up the two backend services with healthchecks.
+- The frontend is intentionally left out of compose for now (Vite dev server + HMR works better locally).
+- To rebuild after code changes: `docker compose up --build --force-recreate`
+
+## Development Tips
+- Run services individually when actively editing (faster iteration than Docker rebuilds).
+- The AI service try-on calls can take 20-60s (public HF Space queue). This is expected.
 
 ## Notes
 
