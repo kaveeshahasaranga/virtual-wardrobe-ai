@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Camera, Upload, RefreshCw, User, Palette, Info } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Camera, Upload, RefreshCw, User, Palette, Info, X } from 'lucide-react'
 import { toast } from 'sonner'
 import api, { getDemoUserId } from '../lib/api'
 
@@ -9,6 +9,11 @@ export default function VirtualWardrobe() {
   const [tryOnResult, setTryOnResult] = useState(null)
   const [selectedGarment, setSelectedGarment] = useState(null)
   const [analysisResults, setAnalysisResults] = useState(null)
+
+  // Webcam state
+  const [isWebcamActive, setIsWebcamActive] = useState(false)
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
 
   // Sample garments (in real app these would come from backend)
   const sampleGarments = [
@@ -21,6 +26,7 @@ export default function VirtualWardrobe() {
   const handleImageUpload = (e) => {
     const file = e.target.files[0]
     if (file) {
+      stopWebcam()
       const reader = new FileReader()
       reader.onload = (event) => {
         setSelectedImage(event.target.result)
@@ -32,10 +38,95 @@ export default function VirtualWardrobe() {
     }
   }
 
-  const startWebcam = async () => {
-    toast.info('Webcam capture coming soon in full implementation')
-    // In full version: use navigator.mediaDevices.getUserMedia + canvas capture
+  // Cleanup webcam stream
+  const stopWebcam = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+    setIsWebcamActive(false)
   }
+
+  const startWebcam = async () => {
+    try {
+      stopWebcam() // ensure clean state
+
+      const constraints = {
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      streamRef.current = stream
+      setIsWebcamActive(true)
+
+      // Small delay to ensure video element is mounted
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+        }
+      }, 60)
+
+      setTryOnResult(null)
+      setAnalysisResults(null)
+      toast.success('Webcam active — position yourself and click Capture')
+    } catch (err) {
+      console.error('Webcam error:', err)
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        toast.error('Camera access denied. Please allow camera permissions in your browser.')
+      } else if (err.name === 'NotFoundError') {
+        toast.error('No camera found. Please connect a webcam.')
+      } else {
+        toast.error('Failed to start webcam. Check browser permissions and try again.')
+      }
+    }
+  }
+
+  const captureFromWebcam = () => {
+    const video = videoRef.current
+    if (!video) {
+      toast.error('Camera feed not ready yet')
+      return
+    }
+
+    // Ensure the video has valid dimensions and is ready
+    if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+      // Retry shortly if the feed is still initializing
+      setTimeout(captureFromWebcam, 120)
+      return
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+    // Use JPEG for smaller size, good quality for try-on models
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+
+    setSelectedImage(dataUrl)
+    setTryOnResult(null)
+    setAnalysisResults(null)
+
+    stopWebcam()
+    toast.success('Photo captured from webcam!')
+  }
+
+  // Cleanup on unmount + attach stream when webcam activates
+  useEffect(() => {
+    if (isWebcamActive && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current
+    }
+
+    return () => {
+      stopWebcam()
+    }
+  }, [isWebcamActive])
 
   const generateTryOn = async () => {
     if (!selectedImage || !selectedGarment) {
@@ -97,8 +188,12 @@ export default function VirtualWardrobe() {
           <div className="flex items-center justify-between mb-3">
             <div className="font-medium flex items-center gap-2"><User className="w-4 h-4" /> Your Photo</div>
             <div className="flex gap-2">
-              <button onClick={startWebcam} className="flex items-center gap-2 px-4 py-2 text-sm bg-white/5 hover:bg-white/10 rounded-xl border border-white/10">
-                <Camera className="w-4 h-4" /> Webcam
+              <button 
+                onClick={startWebcam} 
+                className="flex items-center gap-2 px-4 py-2 text-sm bg-white/5 hover:bg-white/10 rounded-xl border border-white/10"
+              >
+                <Camera className="w-4 h-4" /> 
+                {selectedImage ? 'Retake with webcam' : 'Webcam'}
               </button>
               <label className="flex items-center gap-2 px-4 py-2 text-sm bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 cursor-pointer">
                 <Upload className="w-4 h-4" /> Upload
@@ -107,14 +202,60 @@ export default function VirtualWardrobe() {
             </div>
           </div>
 
-          <div className="tryon-container aspect-[4/3] flex items-center justify-center relative overflow-hidden">
-            {selectedImage ? (
-              <img src={selectedImage} alt="Your photo" className="max-h-full object-contain" />
+          <div className="tryon-container aspect-[4/3] flex items-center justify-center relative overflow-hidden bg-zinc-900">
+            {isWebcamActive ? (
+              // Live webcam feed
+              <div className="relative w-full h-full">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover scale-x-[-1]"
+                />
+                {/* LIVE indicator */}
+                <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 bg-red-500/90 text-white text-[10px] font-medium rounded-full">
+                  <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                  LIVE
+                </div>
+                {/* Capture button overlay */}
+                <div className="absolute inset-x-0 bottom-4 flex justify-center">
+                  <button
+                    onClick={captureFromWebcam}
+                    className="flex items-center gap-2 px-6 py-3 bg-white text-black font-medium rounded-2xl shadow-lg active:scale-[0.985] transition-all"
+                  >
+                    <Camera className="w-4 h-4" /> Capture Photo
+                  </button>
+                </div>
+                <button
+                  onClick={stopWebcam}
+                  className="absolute top-3 right-3 flex items-center gap-1 px-3 py-1.5 text-xs bg-black/70 hover:bg-black/90 rounded-full"
+                >
+                  <X className="w-3.5 h-3.5" /> Cancel
+                </button>
+              </div>
+            ) : selectedImage ? (
+              // Captured / uploaded photo
+              <div className="relative w-full h-full flex items-center justify-center">
+                <img src={selectedImage} alt="Your photo" className="max-h-full object-contain" />
+                <button
+                  onClick={() => {
+                    setSelectedImage(null)
+                    setTryOnResult(null)
+                    setAnalysisResults(null)
+                  }}
+                  className="absolute top-3 right-3 flex items-center gap-1 px-3 py-1.5 text-xs bg-black/70 hover:bg-black/90 rounded-full"
+                >
+                  <X className="w-3.5 h-3.5" /> Clear
+                </button>
+              </div>
             ) : (
-              <div className="text-center text-zinc-500">
+              // Empty state
+              <div className="text-center text-zinc-500 px-6">
                 <Camera className="w-10 h-10 mx-auto mb-4 opacity-50" />
                 <p>Upload a clear full-body or half-body photo</p>
                 <p className="text-xs mt-1">Best results with good lighting and front pose</p>
+                <p className="text-[10px] text-zinc-600 mt-3">Or click the Webcam button above for live capture</p>
               </div>
             )}
           </div>
