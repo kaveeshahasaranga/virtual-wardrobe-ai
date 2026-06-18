@@ -76,7 +76,9 @@ def run_idm_vton(person_img: PILImage.Image, garment_img: PILImage.Image) -> PIL
 
 class TryOnRequest(BaseModel):
     user_image_base64: str
-    garment_id: int
+    garment_id: int | None = None
+    garment_image_base64: str | None = None
+    garment_url: str | None = None
 
 class AnalysisResponse(BaseModel):
     success: bool
@@ -201,9 +203,14 @@ async def virtual_try_on(request: TryOnRequest):
         # 1. Decode user photo
         person_img = base64_to_pil(request.user_image_base64)
 
-        # 2. Get matching garment image (demo mapping)
-        garment_url = SAMPLE_GARMENTS.get(request.garment_id, SAMPLE_GARMENTS[1])
-        garment_img = download_image(garment_url)
+        # 2. Get garment image: prefer provided base64 or url from catalog, else fallback to demo mapping
+        if request.garment_image_base64:
+            garment_img = base64_to_pil(request.garment_image_base64)
+        elif request.garment_url:
+            garment_img = download_image(request.garment_url)
+        else:
+            garment_url = SAMPLE_GARMENTS.get(request.garment_id or 1, SAMPLE_GARMENTS[1])
+            garment_img = download_image(garment_url)
 
         # 3. Call the real HF Space (IDM-VTON)
         result_img = run_idm_vton(person_img, garment_img)

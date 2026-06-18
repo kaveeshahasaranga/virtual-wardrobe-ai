@@ -5,23 +5,19 @@ import api, { getDemoUserId } from '../lib/api'
 
 export default function VirtualWardrobe() {
   const [selectedImage, setSelectedImage] = useState(null)
-  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStep, setProcessingStep] = useState('idle') // idle | analyzing | generating | success | error
   const [tryOnResult, setTryOnResult] = useState(null)
   const [selectedGarment, setSelectedGarment] = useState(null)
   const [analysisResults, setAnalysisResults] = useState(null)
+
+  // Dynamic garment catalog from backend (Mongo)
+  const [garments, setGarments] = useState([])
+  const [loadingGarments, setLoadingGarments] = useState(true)
 
   // Webcam state
   const [isWebcamActive, setIsWebcamActive] = useState(false)
   const videoRef = useRef(null)
   const streamRef = useRef(null)
-
-  // Sample garments (in real app these would come from backend)
-  const sampleGarments = [
-    { id: 1, name: "Oversized White Tee", category: "Top", color: "White", image: "https://images.unsplash.com/photo-1618519764620-7403ba5c9c52?w=300" },
-    { id: 2, name: "Black Denim Jacket", category: "Outerwear", color: "Black", image: "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=300" },
-    { id: 3, name: "Beige Linen Shirt", category: "Top", color: "Beige", image: "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=300" },
-    { id: 4, name: "Relaxed Chino Pants", category: "Bottom", color: "Khaki", image: "https://images.unsplash.com/photo-1542272604-787c3835535d?w=300" },
-  ]
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0]
@@ -32,6 +28,7 @@ export default function VirtualWardrobe() {
         setSelectedImage(event.target.result)
         setTryOnResult(null)
         setAnalysisResults(null)
+        setProcessingStep('idle')
         toast.success('Photo uploaded. Ready for try-on.')
       }
       reader.readAsDataURL(file)
@@ -72,6 +69,7 @@ export default function VirtualWardrobe() {
 
       setTryOnResult(null)
       setAnalysisResults(null)
+      setProcessingStep('idle')
       toast.success('Webcam active — position yourself and click Capture')
     } catch (err) {
       console.error('Webcam error:', err)
@@ -112,6 +110,7 @@ export default function VirtualWardrobe() {
     setSelectedImage(dataUrl)
     setTryOnResult(null)
     setAnalysisResults(null)
+    setProcessingStep('idle')
 
     stopWebcam()
     toast.success('Photo captured from webcam!')
@@ -128,16 +127,44 @@ export default function VirtualWardrobe() {
     }
   }, [isWebcamActive])
 
+  // Load garments from backend catalog (Mongo)
+  useEffect(() => {
+    const loadGarments = async () => {
+      setLoadingGarments(true)
+      try {
+        const data = await api.getGarments()
+        if (data.success && data.garments?.length) {
+          setGarments(data.garments)
+        } else {
+          // Fallback to a couple if backend empty (should be seeded)
+          setGarments([
+            { id: '1', name: "Oversized White Tee", category: "Top", color: "White", image: "https://images.unsplash.com/photo-1618519764620-7403ba5c9c52?w=300" },
+          ])
+        }
+      } catch (e) {
+        // graceful fallback
+        setGarments([
+          { id: 'fallback1', name: "Oversized White Tee", category: "Top", color: "White", image: "https://images.unsplash.com/photo-1618519764620-7403ba5c9c52?w=300" },
+          { id: 'fallback2', name: "Black Denim Jacket", category: "Outerwear", color: "Black", image: "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=300" },
+        ])
+      } finally {
+        setLoadingGarments(false)
+      }
+    }
+    loadGarments()
+  }, [])
+
   const generateTryOn = async () => {
     if (!selectedImage || !selectedGarment) {
       toast.error('Please upload a photo and select a garment')
       return
     }
 
-    setIsProcessing(true)
+    setProcessingStep('analyzing')
+    setTryOnResult(null)
 
     try {
-      // 1. Analyze pose + body shape + skin tone via backend gateway (recommended)
+      // Step 1: Fast analysis (pose + body + skin)
       const analyzeData = await api.analyzeUser(selectedImage)
 
       if (analyzeData.success) {
@@ -146,32 +173,38 @@ export default function VirtualWardrobe() {
         localStorage.setItem('userPhotoBase64', selectedImage)
         localStorage.setItem('lastAnalysis', JSON.stringify(analyzeData))
 
-        // Save to Mongo via backend
-        api.saveAnalysis(analyzeData).catch(() => {
-          // non-fatal
-        })
-
-        toast.info(`Body: ${analyzeData.body_type || 'N/A'} • Skin: ${analyzeData.skin_tone_category || 'N/A'}`, {
-          description: analyzeData.skin_tone
-        })
+        // Save to Mongo via backend (non-blocking)
+        api.saveAnalysis(analyzeData).catch(() => {})
       }
 
-      // 2. Call try-on through gateway (placeholder for now, ready for real diffusion)
-      const tryOnData = await api.generateTryOn(selectedImage, selectedGarment.id)
+      // Step 2: Slow diffusion try-on (this is the long part)
+      setProcessingStep('generating')
+
+      const tryOnData = await api.generateTryOn(selectedImage, selectedGarment)
 
       setTryOnResult(tryOnData.result_image)
-      toast.success('Virtual try-on generated!', { 
-        description: analyzeData.success 
-          ? `Using ${analyzeData.body_type} + ${analyzeData.skin_tone_category} conditioning` 
-          : 'Using diffusion-based synthesis' 
-      })
+
+      if (tryOnData.success) {
+        setProcessingStep('success')
+        toast.success('Virtual try-on generated!', { 
+          description: analyzeData.success 
+            ? `Using ${analyzeData.body_type} + ${analyzeData.skin_tone_category} conditioning` 
+            : 'Using diffusion-based synthesis' 
+        })
+      } else {
+        setProcessingStep('success')
+        toast.success('Try-on complete (using fallback image)', {
+          description: tryOnData.message || 'Real generation failed — showing demo result'
+        })
+      }
     } catch (err) {
       console.error(err)
+      setProcessingStep('error')
       // Fallback to placeholder if AI service not running
       setTryOnResult(`https://picsum.photos/id/${Math.floor(Math.random() * 100)}/600/800`)
-      toast.warning('AI service not reachable — showing demo result. Start the ai-service to get real pose analysis.')
-    } finally {
-      setIsProcessing(false)
+      toast.warning('Generation took too long or failed — showing demo result.', {
+        description: 'The public IDM-VTON queue can be slow. Try again later or start the local AI service.'
+      })
     }
   }
 
@@ -190,12 +223,13 @@ export default function VirtualWardrobe() {
             <div className="flex gap-2">
               <button 
                 onClick={startWebcam} 
-                className="flex items-center gap-2 px-4 py-2 text-sm bg-white/5 hover:bg-white/10 rounded-xl border border-white/10"
+                disabled={processingStep === 'analyzing' || processingStep === 'generating'}
+                className="flex items-center gap-2 px-4 py-2 text-sm bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 disabled:opacity-50"
               >
                 <Camera className="w-4 h-4" /> 
                 {selectedImage ? 'Retake with webcam' : 'Webcam'}
               </button>
-              <label className="flex items-center gap-2 px-4 py-2 text-sm bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 cursor-pointer">
+              <label className={`flex items-center gap-2 px-4 py-2 text-sm bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 ${processingStep === 'analyzing' || processingStep === 'generating' ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>
                 <Upload className="w-4 h-4" /> Upload
                 <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
               </label>
@@ -243,6 +277,7 @@ export default function VirtualWardrobe() {
                     setSelectedImage(null)
                     setTryOnResult(null)
                     setAnalysisResults(null)
+                    setProcessingStep('idle')
                   }}
                   className="absolute top-3 right-3 flex items-center gap-1 px-3 py-1.5 text-xs bg-black/70 hover:bg-black/90 rounded-full"
                 >
@@ -263,35 +298,93 @@ export default function VirtualWardrobe() {
 
         {/* Garment Selection */}
         <div className="lg:col-span-7">
-          <div className="font-medium mb-3">Select Garment</div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {sampleGarments.map((garment) => (
+          <div className="font-medium mb-3 flex items-center justify-between">
+            <span>Select Garment</span>
+            {loadingGarments && <span className="text-xs text-zinc-500">Loading catalog...</span>}
+          </div>
+          <div className={`grid grid-cols-2 sm:grid-cols-4 gap-4 ${processingStep === 'analyzing' || processingStep === 'generating' ? 'opacity-60 pointer-events-none' : ''}`}>
+            {garments.map((garment) => (
               <div 
                 key={garment.id}
                 onClick={() => setSelectedGarment(garment)}
-                className={`garment-card cursor-pointer rounded-2xl overflow-hidden border ${selectedGarment?.id === garment.id ? 'border-indigo-500 ring-2 ring-indigo-500/30' : 'border-white/10'}`}
+                className={`garment-card cursor-pointer rounded-2xl overflow-hidden border relative ${selectedGarment?.id === garment.id ? 'border-indigo-500 ring-2 ring-indigo-500/30' : 'border-white/10'}`}
               >
                 <img src={garment.image} alt={garment.name} className="w-full aspect-square object-cover" />
                 <div className="p-3 text-sm">
                   <div className="font-medium">{garment.name}</div>
                   <div className="text-xs text-zinc-500">{garment.category} • {garment.color}</div>
                 </div>
+                {/* Quick delete for demo catalog management */}
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`Delete ${garment.name}?`)) return;
+                    try {
+                      await api.deleteGarment(garment.id);
+                      setGarments(prev => prev.filter(g => g.id !== garment.id));
+                      if (selectedGarment?.id === garment.id) setSelectedGarment(null);
+                      toast.success('Garment removed from catalog');
+                    } catch (err) {
+                      toast.error('Delete failed');
+                    }
+                  }}
+                  className="absolute top-1 right-1 text-[10px] bg-black/70 hover:bg-red-600/80 px-1.5 py-0.5 rounded"
+                >
+                  ×
+                </button>
               </div>
             ))}
+            {garments.length === 0 && !loadingGarments && (
+              <div className="col-span-4 text-sm text-zinc-500 p-4 border border-white/10 rounded-2xl">No garments in catalog yet. (Seed should have run on backend)</div>
+            )}
           </div>
+
+          {/* Quick demo: add a new garment to the Mongo catalog */}
+          <button
+            onClick={async () => {
+              const newGarment = {
+                name: "Lightweight Denim Jacket",
+                category: "Outerwear",
+                color: "Light Blue",
+                image: "https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=512",
+              };
+              try {
+                const res = await api.createGarment(newGarment);
+                if (res.success) {
+                  setGarments(prev => [res.garment, ...prev]);
+                  toast.success('Added new garment to catalog');
+                }
+              } catch (e) {
+                toast.error('Failed to add garment');
+              }
+            }}
+            className="mt-3 text-xs px-3 py-1.5 rounded-xl border border-white/10 hover:bg-white/5"
+          >
+            + Add demo garment to catalog (Mongo)
+          </button>
 
           <button 
             onClick={generateTryOn}
-            disabled={!selectedImage || !selectedGarment || isProcessing}
+            disabled={!selectedImage || !selectedGarment || processingStep === 'analyzing' || processingStep === 'generating'}
             className="mt-6 w-full flex items-center justify-center gap-3 bg-white text-black font-medium py-3.5 rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.985] transition-all"
           >
-            {isProcessing ? (
-              <> <RefreshCw className="w-4 h-4 animate-spin" /> Generating realistic try-on... </>
-            ) : (
+            {processingStep === 'analyzing' && (
+              <> <RefreshCw className="w-4 h-4 animate-spin" /> Analyzing pose, body shape & skin tone... </>
+            )}
+            {processingStep === 'generating' && (
+              <> <RefreshCw className="w-4 h-4 animate-spin" /> Generating realistic try-on with IDM-VTON... (20-60s) </>
+            )}
+            {(processingStep === 'idle' || processingStep === 'success' || processingStep === 'error') && (
               'Generate Virtual Try-On'
             )}
           </button>
-          <p className="text-center text-[10px] text-zinc-500 mt-3">Powered by diffusion models + MediaPipe pose estimation (see research report for details)</p>
+
+          {processingStep === 'generating' && (
+            <p className="text-center text-[10px] text-amber-400 mt-2">
+              The public Hugging Face model can be slow. Please wait...
+            </p>
+          )}
+          <p className="text-center text-[10px] text-zinc-500 mt-1">Powered by diffusion models + MediaPipe pose estimation (see research report for details)</p>
         </div>
 
         {/* AI Analysis Insights - XAI Cards (for demo & explainability) */}
@@ -299,6 +392,9 @@ export default function VirtualWardrobe() {
           <div className="lg:col-span-12">
             <div className="font-medium mb-3 flex items-center gap-2">
               <Info className="w-4 h-4" /> AI Analysis Insights <span className="text-xs text-zinc-500">(Explainable AI)</span>
+              {processingStep === 'generating' && (
+                <span className="text-xs text-emerald-400 ml-2">• Analysis complete — generating image...</span>
+              )}
             </div>
             <div className="grid md:grid-cols-2 gap-4">
               {/* Body Shape Card */}
@@ -328,8 +424,8 @@ export default function VirtualWardrobe() {
           </div>
         )}
 
-        {/* Result Area */}
-        {tryOnResult && (
+        {/* Result Area - show original early, try-on when ready */}
+        {(selectedImage && (analysisResults || tryOnResult)) && (
           <div className="lg:col-span-12 mt-4">
             <div className="font-medium mb-3 flex items-center gap-2">Result</div>
             <div className="grid md:grid-cols-2 gap-6">
@@ -339,11 +435,23 @@ export default function VirtualWardrobe() {
               </div>
               <div>
                 <div className="text-xs uppercase tracking-widest text-zinc-500 mb-2">Virtual Try-On</div>
-                <img src={tryOnResult} className="rounded-2xl border border-white/10" alt="try-on result" />
-                <div className="mt-4 text-sm text-emerald-400 flex items-center gap-2">
-                  High fidelity • Garment details preserved
-                  {analysisResults && <span className="text-xs text-white/60">• Conditioned on body + skin tone</span>}
-                </div>
+                {tryOnResult ? (
+                  <img src={tryOnResult} className="rounded-2xl border border-white/10" alt="try-on result" />
+                ) : (
+                  <div className="rounded-2xl border border-white/10 bg-zinc-900/60 aspect-[4/3] flex items-center justify-center text-center px-6">
+                    <div>
+                      <RefreshCw className="w-8 h-8 mx-auto mb-3 animate-spin text-zinc-400" />
+                      <div className="text-sm text-zinc-300">Generating your try-on...</div>
+                      <div className="text-[10px] text-zinc-500 mt-1">This can take 20–60 seconds on the public model</div>
+                    </div>
+                  </div>
+                )}
+                {tryOnResult && (
+                  <div className="mt-4 text-sm text-emerald-400 flex items-center gap-2">
+                    High fidelity • Garment details preserved
+                    {analysisResults && <span className="text-xs text-white/60">• Conditioned on body + skin tone</span>}
+                  </div>
+                )}
               </div>
             </div>
           </div>

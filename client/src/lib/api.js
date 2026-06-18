@@ -23,13 +23,47 @@ export const api = {
     return res.json()
   },
 
-  async generateTryOn(userImageBase64, garmentId) {
+  async generateTryOn(userImageBase64, garment) {
+    // garment can be {id, image, ...} or just id (backward compat)
+    const garmentId = typeof garment === 'object' ? garment.id : garment;
+    const garmentImage = typeof garment === 'object' ? garment.image : null;
+
+    const body = { user_image_base64: userImageBase64, garment_id: garmentId };
+    if (garmentImage) {
+      if (garmentImage.startsWith('data:')) {
+        body.garment_image_base64 = garmentImage;
+      } else {
+        body.garment_url = garmentImage;
+      }
+    }
+
     const res = await fetch(`${BACKEND}/api/ai/try-on`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_image_base64: userImageBase64, garment_id: garmentId }),
-    })
-    return res.json()
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  },
+
+  async getGarments() {
+    const res = await fetch(`${BACKEND}/api/wardrobe/garments`);
+    return res.json();
+  },
+
+  async createGarment(garment) {
+    const res = await fetch(`${BACKEND}/api/wardrobe/garments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(garment),
+    });
+    return res.json();
+  },
+
+  async deleteGarment(id) {
+    const res = await fetch(`${BACKEND}/api/wardrobe/garments/${id}`, {
+      method: 'DELETE',
+    });
+    return res.json();
   },
 
   async getRecommendations(userAnalysis) {

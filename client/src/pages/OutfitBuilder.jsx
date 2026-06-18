@@ -144,7 +144,7 @@ export default function OutfitBuilder() {
       setGeneratedLooks([...looks])
 
       try {
-        const res = await api.generateTryOn(userPhoto, item.id)
+        const res = await api.generateTryOn(userPhoto, item)
         looks[looks.length - 1] = {
           item,
           image: res.result_image,
