@@ -67,7 +67,7 @@ export const api = {
   },
 
   async getRecommendations(userAnalysis) {
-    const res = await fetch(`${BACKEND}/api/ai/recommendations`, {
+    const res = await fetch(`${BACKEND}/api/wardrobe/recommendations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(userAnalysis),

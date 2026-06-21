@@ -129,6 +129,80 @@ router.delete('/garments/:id', async (req, res) => {
   }
 });
 
+// Recommendations using the live garment catalog + body/skin scoring
+// (moved/enhanced from AI service for real data access)
+router.post('/recommendations', async (req, res) => {
+  try {
+    const { body_type = "Rectangle / Balanced", skin_tone_category = "Neutral" } = req.body;
+
+    const rawGarments = await Garment.find().lean();
+
+    if (!rawGarments.length) {
+      return res.json({ success: true, recommendations: [], explanation: "No garments in catalog yet." });
+    }
+
+    let catalog = rawGarments.map(item => ({
+      id: item._id.toString(),
+      name: item.name,
+      category: item.category,
+      color: item.color,
+      image: item.image,
+      reason_base: `Versatile ${item.category.toLowerCase()} that works for many looks`,
+    }));
+
+    const scored = [];
+    for (const item of catalog) {
+      let score = 0.75;
+
+      // Body shape logic (ported + adapted)
+      if (body_type.includes("Rectangle") || body_type.includes("Balanced")) {
+        if (item.name.toLowerCase().includes("wide") || item.name.toLowerCase().includes("oversized") || item.name.toLowerCase().includes("structured")) {
+          score += 0.12;
+        }
+      }
+      if (body_type.includes("Inverted")) {
+        if (item.name.toLowerCase().includes("high-waist") || item.name.toLowerCase().includes("tapered")) {
+          score += 0.10;
+        }
+      }
+      if (body_type.includes("Pear") || body_type.includes("Hourglass")) {
+        if (item.name.toLowerCase().includes("oversized") || item.name.toLowerCase().includes("wide")) {
+          score += 0.08;
+        }
+      }
+
+      // Skin tone logic
+      if (skin_tone_category === "Warm") {
+        if (["Beige", "Olive", "Cream", "Khaki", "White"].includes(item.color)) score += 0.10;
+      } else if (skin_tone_category === "Cool") {
+        if (["Light Blue", "White", "Black", "Cream"].includes(item.color)) score += 0.10;
+      } else {
+        score += 0.05;
+      }
+
+      const reason = `${item.reason_base}. Complements your ${body_type.split('/')[0].trim().toLowerCase()} shape and ${skin_tone_category.toLowerCase()} undertones.`;
+
+      scored.push({
+        ...item,
+        score: Math.min(Math.round(score * 100) / 100, 0.98),
+        reason,
+      });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    const topRecs = scored.slice(0, 5);
+
+    res.json({
+      success: true,
+      recommendations: topRecs,
+      explanation: `Recommendations generated using your ${body_type} body shape and ${skin_tone_category} skin undertones from the live catalog.`,
+    });
+  } catch (err) {
+    console.error('Recommendations error:', err);
+    res.status(500).json({ success: false, message: 'Failed to generate recommendations' });
+  }
+});
+
 // Basic health for persistence
 router.get('/health', (req, res) => {
   res.json({ 

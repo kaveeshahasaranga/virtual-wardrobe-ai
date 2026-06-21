@@ -29,6 +29,8 @@ async function seedDefaultGarments() {
         { name: "Black Denim Jacket", category: "Outerwear", color: "Black", image: "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=512" },
         { name: "Beige Linen Shirt", category: "Top", color: "Beige", image: "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=512" },
         { name: "Relaxed Chino Pants", category: "Bottom", color: "Khaki", image: "https://images.unsplash.com/photo-1542272604-787c3835535d?w=512" },
+        { name: "High-waist Wide Leg Pants", category: "Bottom", color: "Olive", image: "https://images.unsplash.com/photo-1506629082955-511b1aa562c8?w=512" },
+        { name: "Soft Structured Blazer", category: "Outerwear", color: "Cream", image: "https://images.unsplash.com/photo-1594938298603-c8148c4dae35?w=512" },
       ];
       await Garment.insertMany(defaults);
       console.log('✅ Seeded default garments into MongoDB');

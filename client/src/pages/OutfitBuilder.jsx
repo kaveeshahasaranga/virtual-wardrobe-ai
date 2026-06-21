@@ -95,12 +95,9 @@ export default function OutfitBuilder() {
       }
     } catch (e) {
       toast.error('Could not load recommendations. Using fallback.')
-      // Fallback with analysis-aware items
+      // Minimal fallback (real data should come from server)
       setRecommendations([
-        { id: 101, name: "Oversized Linen Shirt", category: "Top", color: "Beige", score: 0.92, reason: "Soft structure flatters your shape and complements warm undertones." },
-        { id: 102, name: "High-waist Wide Leg Pants", category: "Bottom", color: "Olive", score: 0.88, reason: "Balances proportions for your body type." },
-        { id: 103, name: "Soft Structured Blazer", category: "Outerwear", color: "Cream", score: 0.85, reason: "Adds definition while respecting your skin tone." },
-        { id: 104, name: "Relaxed Cotton Tee", category: "Top", color: "White", score: 0.81, reason: "Clean base that works beautifully with your undertones." },
+        { id: 'fb1', name: "Oversized Linen Shirt", category: "Top", color: "Beige", score: 0.85, reason: "Soft structure flatters your shape.", image: "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=300" },
       ])
     } finally {
       setIsLoadingRecs(false)
@@ -258,6 +255,9 @@ export default function OutfitBuilder() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             {recommendations.map((item) => (
               <div key={item.id} className="rounded-2xl border border-white/10 bg-zinc-900/60 p-4 flex flex-col">
+                {item.image && (
+                  <img src={item.image} alt={item.name} className="w-full h-32 object-cover rounded-xl mb-3" />
+                )}
                 <div className="font-semibold">{item.name}</div>
                 <div className="text-xs text-zinc-500 mb-2">{item.category} • {item.color}</div>
                 <div className="text-sm text-zinc-400 flex-1">{item.reason}</div>
